@@ -1,0 +1,24 @@
+[project]
+name = "fastapi-air-quality"
+version = "0.1.0"
+description = "Air-quality snapshots from Open-Meteo, served with FastAPI"
+requires-python = ">=3.14"
+dependencies = [
+    "fastapi[standard-no-fastapi-cloud-cli]>=0.141.1",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "ruff>=0.16.8",
+]
+
+[tool.pytest]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]

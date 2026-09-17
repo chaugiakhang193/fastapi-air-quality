@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+build/
+dist/
+*.egg-info/
+
+# Local environment, may hold secrets
+.env
+.env.*
+!.env.example
+
+# Markdown stays private by default: most .md files here are working notes.
+# Public docs are allowed one file at a time, never a whole folder,
+# so drafts cannot slip in.
+*.md
+!/README.md
+
+# Editors and OS
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
