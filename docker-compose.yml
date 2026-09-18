@@ -1,0 +1,37 @@
+name: fastapi-air-quality
+
+# Host ports 5436/6380 are fixed on purpose: 5432-5435 and 6379 are already taken by
+# other local projects. Both are bound to localhost only.
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: airq-db
+    environment:
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+      POSTGRES_DB: ${DB_NAME:-air_quality}
+    ports:
+      - '127.0.0.1:5436:5432'
+    volumes:
+      - airq-db-data:/var/lib/postgresql/data
+    # pg_isready only proves the server accepts connections; it still succeeds for a wrong
+    # user or database name, so it does not prove the app can log in.
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${DB_USER:-postgres} -d ${DB_NAME:-air_quality}']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: airq-redis
+    ports:
+      - '127.0.0.1:6380:6379'
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  airq-db-data:
