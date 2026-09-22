@@ -8,4 +8,4 @@ def test_locations_are_loaded_from_database() -> None:
         response = client.get("/locations")
 
     assert response.status_code == 200
-    assert len(response.json()) == 5
+    assert len(response.json()["Data"]) == 5

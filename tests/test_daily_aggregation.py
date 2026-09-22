@@ -45,7 +45,7 @@ async def _get_day() -> dict:
             params={"Locations": "hanoi", "From": "2026-09-18", "To": "2026-09-18"},
         )
     assert response.status_code == 200
-    return response.json()[0]["Days"][0]
+    return response.json()["Data"][0]["Days"][0]
 
 
 @pytest.mark.anyio

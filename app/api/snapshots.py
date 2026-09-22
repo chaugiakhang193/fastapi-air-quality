@@ -1,12 +1,14 @@
 import hmac
 
+import httpx2
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
 
+from app.core.envelope import EnvelopeRoute
 from app.core.settings import Settings, get_settings
 from app.services.snapshot_service import SnapshotLockHeldError, take_snapshot
 
-router = APIRouter(prefix="/snapshots", tags=["snapshots"])
+router = APIRouter(prefix="/snapshots", tags=["snapshots"], route_class=EnvelopeRoute)
 
 
 def require_snapshot_api_key(
@@ -28,10 +30,28 @@ async def create_snapshot(
     except SnapshotLockHeldError:
         raise HTTPException(
             status_code=409,
-            detail="A snapshot run is already in progress",
+            detail={"code": "LOCK_HELD", "message": "A snapshot run is already in progress"},
         ) from None
-    except Exception:
-        raise HTTPException(status_code=502, detail="Upstream snapshot request failed") from None
+    except httpx2.HTTPStatusError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "code": "UPSTREAM_ERROR",
+                "message": f"Open-Meteo returned {exc.response.status_code}",
+            },
+        ) from exc
+    except httpx2.RequestError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={"code": "UPSTREAM_UNAVAILABLE", "message": "Could not reach Open-Meteo"},
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=502, detail={"code": "UPSTREAM_ERROR", "message": str(exc)}
+        ) from exc
+    # Any other exception (e.g. a DB error) is a real bug, not an upstream
+    # failure, so it is left to propagate to EnvelopeRoute's generic 500
+    # handler instead of being mislabelled as a 502 here.
 
     status_code = 201 if result.status == "created" else 200
     return JSONResponse(

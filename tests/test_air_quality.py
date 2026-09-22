@@ -38,10 +38,10 @@ def test_get_hourly_uses_shared_client_and_open_meteo_shape() -> None:
         app.dependency_overrides.clear()
 
     assert response.status_code == 200
-    body = response.json()
-    assert [entry["Code"] for entry in body] == ["hanoi", "hcmc"]
-    assert body[0]["Hourly"]["pm2_5"] == [10.0]
-    assert body[1]["Hourly"]["pm2_5"] == [20.0]
+    data = response.json()["Data"]
+    assert [entry["Code"] for entry in data] == ["hanoi", "hcmc"]
+    assert data[0]["Hourly"]["pm2_5"] == [10.0]
+    assert data[1]["Hourly"]["pm2_5"] == [20.0]
 
 
 def test_get_hourly_rejects_unknown_location_code() -> None:
@@ -49,6 +49,9 @@ def test_get_hourly_rejects_unknown_location_code() -> None:
         response = client.get("/air-quality/hourly", params={"Locations": "atlantis"})
 
     assert response.status_code == 404
+    body = response.json()
+    assert body["Data"] is None
+    assert body["Error"]["Code"] == "NOT_FOUND"
 
 
 def test_get_hourly_rejects_blank_locations_instead_of_calling_upstream() -> None:
@@ -58,6 +61,9 @@ def test_get_hourly_rejects_blank_locations_instead_of_calling_upstream() -> Non
         response = client.get("/air-quality/hourly", params={"Locations": ",,,"})
 
     assert response.status_code == 422
+    body = response.json()
+    assert body["Data"] is None
+    assert body["Error"]["Code"] == "VALIDATION_ERROR"
 
 
 def _mock_single_location_client() -> httpx2.AsyncClient:
@@ -81,9 +87,9 @@ def test_get_hourly_with_a_single_location_normalises_bare_object_to_list() -> N
         app.dependency_overrides.clear()
 
     assert response.status_code == 200
-    body = response.json()
-    assert [entry["Code"] for entry in body] == ["hanoi"]
-    assert body[0]["Hourly"]["pm2_5"] == [10.0]
+    data = response.json()["Data"]
+    assert [entry["Code"] for entry in data] == ["hanoi"]
+    assert data[0]["Hourly"]["pm2_5"] == [10.0]
 
 
 @pytest.mark.anyio
@@ -117,3 +123,45 @@ async def test_fetch_hourly_rejects_a_response_whose_order_does_not_match_the_re
     async with httpx2.AsyncClient(transport=httpx2.MockTransport(handler)) as client:
         with pytest.raises(ValueError, match="order mismatch"):
             await fetch_hourly(client, "https://example.invalid/air-quality", [hanoi, hcmc])
+
+
+def _mock_upstream_5xx_client() -> httpx2.AsyncClient:
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(503, json={"reason": "Open-Meteo is down"})
+
+    return httpx2.AsyncClient(transport=httpx2.MockTransport(handler))
+
+
+def test_get_hourly_maps_open_meteo_error_response_to_502() -> None:
+    app.dependency_overrides[get_http_client] = _mock_upstream_5xx_client
+    try:
+        with TestClient(app) as client:
+            response = client.get("/air-quality/hourly", params={"Locations": "hanoi"})
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 502
+    body = response.json()
+    assert body["Data"] is None
+    assert body["Error"]["Code"] == "UPSTREAM_ERROR"
+
+
+def _mock_upstream_timeout_client() -> httpx2.AsyncClient:
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        raise httpx2.ConnectTimeout("timed out")
+
+    return httpx2.AsyncClient(transport=httpx2.MockTransport(handler))
+
+
+def test_get_hourly_maps_open_meteo_timeout_to_503() -> None:
+    app.dependency_overrides[get_http_client] = _mock_upstream_timeout_client
+    try:
+        with TestClient(app) as client:
+            response = client.get("/air-quality/hourly", params={"Locations": "hanoi"})
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 503
+    body = response.json()
+    assert body["Data"] is None
+    assert body["Error"]["Code"] == "UPSTREAM_UNAVAILABLE"

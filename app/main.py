@@ -2,12 +2,14 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 import httpx2
-from fastapi import FastAPI
+from fastapi import APIRouter, FastAPI, Request
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api.air_quality import router as air_quality_router
 from app.api.locations import router as locations_router
 from app.api.snapshots import router as snapshots_router
 from app.core.db import engine
+from app.core.envelope import EnvelopeRoute, http_exception_to_response
 from app.core.logging import configure_logging
 from app.core.middleware import RequestIdMiddleware, TimingMiddleware
 from app.core.settings import get_settings
@@ -29,6 +31,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(title="fastapi-air-quality", lifespan=lifespan)
 
+
+@app.exception_handler(StarletteHTTPException)
+async def starlette_http_exception_handler(request: Request, exc: StarletteHTTPException):
+    # Covers requests that never matched any route (true 404) or matched the
+    # path with the wrong method (405) — these never reach an EnvelopeRoute
+    # handler, since no APIRoute ever runs for them.
+    return http_exception_to_response(request, exc)
+
+
 # Registered last, so Starlette makes it the outermost layer and it runs
 # before TimingMiddleware on the way in (the last add_middleware() call ends
 # up outermost). RequestIdMiddleware must be outermost so request_id already
@@ -41,7 +52,16 @@ app.include_router(locations_router)
 app.include_router(air_quality_router)
 app.include_router(snapshots_router)
 
+# FastAPI() does not forward route_class to its own internal router (checked
+# against fastapi/applications.py: routing.APIRouter(...) is built without a
+# route_class argument), so /health needs its own APIRouter to get the same
+# envelope wrapping as every other route.
+health_router = APIRouter(route_class=EnvelopeRoute)
 
-@app.get("/health")
+
+@health_router.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+app.include_router(health_router)

@@ -2,11 +2,12 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_session
+from app.core.envelope import EnvelopeRoute
 from app.core.timing import log_duration
 from app.repositories.locations import list_locations
 from app.schemas.location import Location
 
-router = APIRouter(prefix="/locations", tags=["locations"])
+router = APIRouter(prefix="/locations", tags=["locations"], route_class=EnvelopeRoute)
 
 
 @router.get("")

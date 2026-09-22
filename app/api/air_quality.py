@@ -7,11 +7,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clients.open_meteo import fetch_hourly
 from app.core.db import get_session
+from app.core.envelope import EnvelopeRoute
 from app.core.settings import Settings, get_settings
 from app.repositories.locations import get_location_by_code
 from app.schemas.location import Location
 
-router = APIRouter(prefix="/air-quality", tags=["air-quality"])
+router = APIRouter(prefix="/air-quality", tags=["air-quality"], route_class=EnvelopeRoute)
 
 
 def get_http_client(request: Request) -> httpx2.AsyncClient:
@@ -49,7 +50,25 @@ async def get_hourly(
     session: AsyncSession = Depends(get_session),
 ) -> list[dict]:
     locations = await parse_locations(Locations, session)
-    results = await fetch_hourly(client, settings.open_meteo_air_quality_url, locations)
+    try:
+        results = await fetch_hourly(client, settings.open_meteo_air_quality_url, locations)
+    except httpx2.HTTPStatusError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "code": "UPSTREAM_ERROR",
+                "message": f"Open-Meteo returned {exc.response.status_code}",
+            },
+        ) from exc
+    except httpx2.RequestError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={"code": "UPSTREAM_UNAVAILABLE", "message": "Could not reach Open-Meteo"},
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=502, detail={"code": "UPSTREAM_ERROR", "message": str(exc)}
+        ) from exc
     return [
         {"Code": location.code, "Name": location.name, "Hourly": result["hourly"]}
         for location, result in zip(locations, results, strict=True)
