@@ -41,6 +41,13 @@ def main():
     # PowerShell 5.1 can give redirected Python output a legacy encoding.
     sys.stdout.reconfigure(encoding="utf-8")
     metadata = fetch_json(META_URL)
+    print(
+        "last_run_initialisation_time type: "
+        f"{type(metadata['last_run_initialisation_time']).__name__}"
+    )
+    print(
+        f"last_run_availability_time type: {type(metadata['last_run_availability_time']).__name__}"
+    )
     initialisation_time = parse_meta_time(metadata["last_run_initialisation_time"])
     availability_time = parse_meta_time(metadata["last_run_availability_time"])
     ready_time = availability_time + timedelta(minutes=10)

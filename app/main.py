@@ -6,6 +6,8 @@ from fastapi import FastAPI
 
 from app.api.air_quality import router as air_quality_router
 from app.api.locations import router as locations_router
+from app.api.snapshots import router as snapshots_router
+from app.core.db import engine
 from app.core.logging import configure_logging
 from app.core.middleware import RequestIdMiddleware, TimingMiddleware
 from app.core.settings import get_settings
@@ -22,6 +24,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         # try/finally so the client is still closed if something throws the
         # exception back into this generator during shutdown.
         await app.state.http_client.aclose()
+        await engine.dispose()
 
 
 app = FastAPI(title="fastapi-air-quality", lifespan=lifespan)
@@ -36,6 +39,7 @@ app.add_middleware(RequestIdMiddleware)
 
 app.include_router(locations_router)
 app.include_router(air_quality_router)
+app.include_router(snapshots_router)
 
 
 @app.get("/health")
