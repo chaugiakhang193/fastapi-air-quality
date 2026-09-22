@@ -7,6 +7,11 @@ import httpx2
 from app.schemas.location import Location
 
 HOURLY_METRICS = "pm2_5,pm10,us_aqi,european_aqi"
+# CAMS global snaps requested coordinates to a ~0.4-degree model grid cell, so
+# a matching result can be off by close to that much; the tolerance below is
+# wide enough to absorb that snap while still catching a genuine order
+# mismatch, since the seeded locations are all several degrees apart.
+_ORDER_CHECK_TOLERANCE_DEGREES = 1.0
 
 
 @dataclass
@@ -64,7 +69,10 @@ async def _fetch_hourly_single_timezone(
 ) -> dict[str, dict]:
     # One request for every location in this group: Open-Meteo accepts
     # comma-separated latitude/longitude and returns one array entry per
-    # coordinate, in the same order (verified in labs/00_probe_open_meteo.py).
+    # coordinate. Open-Meteo does not publish an explicit ordering contract
+    # for multi-coordinate requests, so _validate_response_order() below
+    # checks each result's own latitude/longitude against the location it is
+    # about to be paired with instead of trusting positional order blindly.
     params = {
         "latitude": ",".join(str(location.latitude) for location in locations),
         "longitude": ",".join(str(location.longitude) for location in locations),
@@ -85,4 +93,26 @@ async def _fetch_hourly_single_timezone(
         payload = [payload]
     if not isinstance(payload, list) or len(payload) != len(locations):
         raise ValueError("Expected one Open-Meteo result per requested location")
+    _validate_response_order(locations, payload)
     return {location.code: result for location, result in zip(locations, payload, strict=True)}
+
+
+def _validate_response_order(locations: Sequence[Location], payload: list[dict]) -> None:
+    for location, result in zip(locations, payload, strict=True):
+        response_latitude = result["latitude"]
+        response_longitude = result["longitude"]
+        latitude_offset = abs(response_latitude - location.latitude)
+        longitude_offset = abs(response_longitude - location.longitude)
+        # Response coordinates are snapped to the CAMS model grid, so they
+        # rarely equal the requested coordinate exactly. A distance-based
+        # tolerance is used instead of equality so a correctly ordered
+        # result is never flagged as a mismatch.
+        if (
+            latitude_offset > _ORDER_CHECK_TOLERANCE_DEGREES
+            or longitude_offset > _ORDER_CHECK_TOLERANCE_DEGREES
+        ):
+            raise ValueError(
+                f"Open-Meteo result order mismatch: expected {location.code} near "
+                f"({location.latitude}, {location.longitude}), got "
+                f"({response_latitude}, {response_longitude})"
+            )

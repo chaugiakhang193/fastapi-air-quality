@@ -132,22 +132,24 @@ async def db_session(test_engine):
         await session.rollback()
 
 
-def _hourly_payload() -> dict:
+def _hourly_payload(latitude: float, longitude: float) -> dict:
     times = [f"2026-09-18T{hour:02d}:00" for hour in range(24)]
     return {
+        "latitude": latitude,
+        "longitude": longitude,
         "hourly": {
             "time": times,
             "pm2_5": [float(hour + 1) for hour in range(24)],
             "pm10": [float(hour + 2) for hour in range(24)],
             "us_aqi": [hour + 10 for hour in range(24)],
             "european_aqi": [hour + 5 for hour in range(24)],
-        }
+        },
     }
 
 
 @pytest.fixture
 async def client():
-    payload = _hourly_payload()
+    payloads = [_hourly_payload(loc["latitude"], loc["longitude"]) for loc in SEED_LOCATIONS]
 
     def handler(request: httpx2.Request) -> httpx2.Response:
         if request.url.path.endswith("meta.json"):
@@ -158,7 +160,7 @@ async def client():
                     "last_run_availability_time": 1789714800,
                 },
             )
-        return httpx2.Response(200, json=[payload.copy() for _ in SEED_LOCATIONS])
+        return httpx2.Response(200, json=payloads)
 
     async with httpx2.AsyncClient(transport=httpx2.MockTransport(handler)) as http_client:
         yield http_client
@@ -166,7 +168,7 @@ async def client():
 
 @pytest.fixture
 async def slow_client():
-    payload = _hourly_payload()
+    payloads = [_hourly_payload(loc["latitude"], loc["longitude"]) for loc in SEED_LOCATIONS]
 
     async def handler(request: httpx2.Request) -> httpx2.Response:
         if request.url.path.endswith("meta.json"):
@@ -178,7 +180,7 @@ async def slow_client():
                     "last_run_availability_time": 1789714800,
                 },
             )
-        return httpx2.Response(200, json=[payload.copy() for _ in SEED_LOCATIONS])
+        return httpx2.Response(200, json=payloads)
 
     async with httpx2.AsyncClient(transport=httpx2.MockTransport(handler)) as http_client:
         yield http_client
