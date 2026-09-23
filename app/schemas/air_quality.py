@@ -5,10 +5,13 @@ from pydantic.alias_generators import to_pascal
 
 
 def split_locations(value: str) -> list[str]:
-    codes = [code.strip() for code in value.split(",") if code.strip()]
+    # Stored codes are lowercase, and a repeated code would make /hourly ask
+    # Open-Meteo for the same coordinate twice, so codes are lowercased and
+    # de-duplicated here while keeping first-seen order.
+    codes = [code.strip().lower() for code in value.split(",") if code.strip()]
     if not codes:
         raise ValueError("Locations must contain at least one code")
-    return codes
+    return list(dict.fromkeys(codes))
 
 
 # Shared by GET /air-quality/hourly and GET /air-quality/daily — both need

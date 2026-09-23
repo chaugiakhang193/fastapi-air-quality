@@ -87,20 +87,18 @@ def override_database(test_engine, monkeypatch):
     app.dependency_overrides.pop(get_session, None)
 
 
+@pytest.fixture
+def settings():
+    # model_copy() leaves the lru_cache'd instance from get_settings()
+    # untouched, so a test that changes a field cannot leak it into later tests.
+    return get_settings().model_copy(update={"snapshot_min_available_delay_minutes": 0})
+
+
 @pytest.fixture(autouse=True)
-def settings_override():
-    settings = get_settings()
-    settings.snapshot_min_available_delay_minutes = 0
+def settings_override(settings):
     app.dependency_overrides[get_settings] = lambda: settings
     yield settings
     app.dependency_overrides.pop(get_settings, None)
-
-
-@pytest.fixture
-def settings():
-    settings = get_settings()
-    settings.snapshot_min_available_delay_minutes = 0
-    return settings
 
 
 @pytest.fixture
@@ -130,6 +128,14 @@ async def db_session(test_engine):
     async with session_factory() as session:
         yield session
         await session.rollback()
+
+
+@pytest.fixture
+async def api_client():
+    async with httpx2.AsyncClient(
+        transport=httpx2.ASGITransport(app=app), base_url="http://test"
+    ) as http_client:
+        yield http_client
 
 
 def _hourly_payload(latitude: float, longitude: float) -> dict:

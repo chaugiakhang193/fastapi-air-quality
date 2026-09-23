@@ -1,10 +1,8 @@
 from datetime import UTC, datetime, timedelta
 
-import httpx2
 import pytest
 from sqlalchemy import select
 
-from app.main import app
 from app.models import AirReadingRow, LocationRow, ModelRunRow
 
 
@@ -36,22 +34,19 @@ async def _seed_day(db_session, hours: int, run_at: datetime) -> None:
     await db_session.commit()
 
 
-async def _get_day() -> dict:
-    async with httpx2.AsyncClient(
-        transport=httpx2.ASGITransport(app=app), base_url="http://test"
-    ) as client:
-        response = await client.get(
-            "/air-quality/daily",
-            params={"Locations": "hanoi", "From": "2026-09-18", "To": "2026-09-18"},
-        )
+async def _get_day(api_client) -> dict:
+    response = await api_client.get(
+        "/air-quality/daily",
+        params={"Locations": "hanoi", "From": "2026-09-18", "To": "2026-09-18"},
+    )
     assert response.status_code == 200
     return response.json()["Data"][0]["Days"][0]
 
 
 @pytest.mark.anyio
-async def test_day_below_min_hours_returns_null_averages(db_session):
+async def test_day_below_min_hours_returns_null_averages(db_session, api_client):
     await _seed_day(db_session, 10, datetime(2026, 9, 18, tzinfo=UTC))
-    day = await _get_day()
+    day = await _get_day(api_client)
 
     assert day["HoursCount"] == 10
     assert day["AvgPm2_5"] is None
@@ -59,9 +54,9 @@ async def test_day_below_min_hours_returns_null_averages(db_session):
 
 
 @pytest.mark.anyio
-async def test_complete_day_returns_averages_and_forecast_hours(db_session):
+async def test_complete_day_returns_averages_and_forecast_hours(db_session, api_client):
     await _seed_day(db_session, 24, datetime(2026, 9, 18, 5, tzinfo=UTC))
-    day = await _get_day()
+    day = await _get_day(api_client)
 
     assert day["HoursCount"] == 24
     assert day["ForecastHours"] == 12
