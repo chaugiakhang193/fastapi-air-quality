@@ -16,12 +16,24 @@ def _mock_client() -> httpx2.AsyncClient:
                 {
                     "latitude": 21.0245,
                     "longitude": 105.84117,
-                    "hourly": {"time": ["2026-09-19T00:00"], "pm2_5": [10.0]},
+                    "hourly": {
+                        "time": ["2026-09-19T00:00"],
+                        "pm2_5": [10.0],
+                        "pm10": [15.0],
+                        "us_aqi": [42],
+                        "european_aqi": [30],
+                    },
                 },
                 {
                     "latitude": 10.82302,
                     "longitude": 106.62965,
-                    "hourly": {"time": ["2026-09-19T00:00"], "pm2_5": [20.0]},
+                    "hourly": {
+                        "time": ["2026-09-19T00:00"],
+                        "pm2_5": [20.0],
+                        "pm10": [25.0],
+                        "us_aqi": [55],
+                        "european_aqi": [40],
+                    },
                 },
             ],
         )
@@ -40,8 +52,12 @@ def test_get_hourly_uses_shared_client_and_open_meteo_shape() -> None:
     assert response.status_code == 200
     data = response.json()["Data"]
     assert [entry["Code"] for entry in data] == ["hanoi", "hcmc"]
-    assert data[0]["Hourly"]["pm2_5"] == [10.0]
-    assert data[1]["Hourly"]["pm2_5"] == [20.0]
+    assert data[0]["Hourly"] == [
+        {"Time": "2026-09-19T00:00", "Pm2_5": 10.0, "Pm10": 15.0, "UsAqi": 42, "EuropeanAqi": 30}
+    ]
+    assert data[1]["Hourly"] == [
+        {"Time": "2026-09-19T00:00", "Pm2_5": 20.0, "Pm10": 25.0, "UsAqi": 55, "EuropeanAqi": 40}
+    ]
 
 
 def test_get_hourly_rejects_unknown_location_code() -> None:
@@ -70,7 +86,13 @@ def _mock_single_location_client() -> httpx2.AsyncClient:
     def handler(request: httpx2.Request) -> httpx2.Response:
         # A single-coordinate request returns a bare JSON object, not a
         # one-item list — checked against the real API.
-        hourly = {"time": ["2026-09-19T00:00"], "pm2_5": [10.0]}
+        hourly = {
+            "time": ["2026-09-19T00:00"],
+            "pm2_5": [10.0],
+            "pm10": [15.0],
+            "us_aqi": [42],
+            "european_aqi": [30],
+        }
         return httpx2.Response(
             200, json={"latitude": 21.0245, "longitude": 105.84117, "hourly": hourly}
         )
@@ -89,7 +111,9 @@ def test_get_hourly_with_a_single_location_normalises_bare_object_to_list() -> N
     assert response.status_code == 200
     data = response.json()["Data"]
     assert [entry["Code"] for entry in data] == ["hanoi"]
-    assert data[0]["Hourly"]["pm2_5"] == [10.0]
+    assert data[0]["Hourly"] == [
+        {"Time": "2026-09-19T00:00", "Pm2_5": 10.0, "Pm10": 15.0, "UsAqi": 42, "EuropeanAqi": 30}
+    ]
 
 
 @pytest.mark.anyio
@@ -136,6 +160,36 @@ def test_get_hourly_maps_open_meteo_error_response_to_502() -> None:
     app.dependency_overrides[get_http_client] = _mock_upstream_5xx_client
     try:
         with TestClient(app) as client:
+            response = client.get("/air-quality/hourly", params={"Locations": "hanoi"})
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 502
+    body = response.json()
+    assert body["Data"] is None
+    assert body["Error"]["Code"] == "UPSTREAM_ERROR"
+
+
+def _mock_mismatched_hourly_lengths_client() -> httpx2.AsyncClient:
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        hourly = {
+            "time": ["2026-09-19T00:00", "2026-09-19T01:00"],
+            "pm2_5": [10.0, 11.0],
+            "pm10": [15.0],
+            "us_aqi": [42, 43],
+            "european_aqi": [30, 31],
+        }
+        return httpx2.Response(
+            200, json={"latitude": 21.0245, "longitude": 105.84117, "hourly": hourly}
+        )
+
+    return httpx2.AsyncClient(transport=httpx2.MockTransport(handler))
+
+
+def test_get_hourly_maps_mismatched_hourly_array_lengths_to_502() -> None:
+    app.dependency_overrides[get_http_client] = _mock_mismatched_hourly_lengths_client
+    try:
+        with TestClient(app, raise_server_exceptions=False) as client:
             response = client.get("/air-quality/hourly", params={"Locations": "hanoi"})
     finally:
         app.dependency_overrides.clear()

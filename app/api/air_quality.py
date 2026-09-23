@@ -10,6 +10,13 @@ from app.core.db import get_session
 from app.core.envelope import EnvelopeRoute
 from app.core.settings import Settings, get_settings
 from app.repositories.locations import get_location_by_code
+from app.schemas.air_quality import (
+    DailyEntry,
+    HourlyReading,
+    LocationCodes,
+    LocationDaily,
+    LocationHourly,
+)
 from app.schemas.location import Location
 
 router = APIRouter(prefix="/air-quality", tags=["air-quality"], route_class=EnvelopeRoute)
@@ -20,11 +27,7 @@ def get_http_client(request: Request) -> httpx2.AsyncClient:
     return request.app.state.http_client
 
 
-async def parse_locations(locations: str, session: AsyncSession) -> list[Location]:
-    codes = [code.strip() for code in locations.split(",") if code.strip()]
-    if not codes:
-        raise HTTPException(status_code=422, detail="Locations must contain at least one code")
-
+async def resolve_locations(codes: list[str], session: AsyncSession) -> list[Location]:
     resolved: list[Location] = []
     for code in codes:
         row = await get_location_by_code(session, code)
@@ -44,12 +47,12 @@ async def parse_locations(locations: str, session: AsyncSession) -> list[Locatio
 
 @router.get("/hourly")
 async def get_hourly(
-    Locations: str,
+    Locations: LocationCodes,
     client: httpx2.AsyncClient = Depends(get_http_client),
     settings: Settings = Depends(get_settings),
     session: AsyncSession = Depends(get_session),
-) -> list[dict]:
-    locations = await parse_locations(Locations, session)
+) -> list[LocationHourly]:
+    locations = await resolve_locations(Locations, session)
     try:
         results = await fetch_hourly(client, settings.open_meteo_air_quality_url, locations)
     except httpx2.HTTPStatusError as exc:
@@ -69,9 +72,49 @@ async def get_hourly(
         raise HTTPException(
             status_code=502, detail={"code": "UPSTREAM_ERROR", "message": str(exc)}
         ) from exc
+    try:
+        return [
+            LocationHourly(
+                code=location.code,
+                name=location.name,
+                hourly=_rows_from_parallel_arrays(result["hourly"]),
+            )
+            for location, result in zip(locations, results, strict=True)
+        ]
+    except ValueError as exc:
+        # Covers both zip(strict=True) on arrays of unequal length and
+        # pydantic.ValidationError (a ValueError subclass) on wrongly typed
+        # values. The message stays generic because str(exc) would expose
+        # internal details such as zip argument positions.
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "code": "UPSTREAM_ERROR",
+                "message": "Open-Meteo returned malformed hourly data",
+            },
+        ) from exc
+
+
+def _rows_from_parallel_arrays(hourly: dict) -> list[HourlyReading]:
+    # Open-Meteo returns parallel arrays (one list per metric, same length,
+    # matched by index) — turned into one HourlyReading row per hour here so
+    # the response is a normal list of objects instead of that shape.
     return [
-        {"Code": location.code, "Name": location.name, "Hourly": result["hourly"]}
-        for location, result in zip(locations, results, strict=True)
+        HourlyReading(
+            time=time,
+            pm2_5=pm2_5,
+            pm10=pm10,
+            us_aqi=us_aqi,
+            european_aqi=european_aqi,
+        )
+        for time, pm2_5, pm10, us_aqi, european_aqi in zip(
+            hourly["time"],
+            hourly["pm2_5"],
+            hourly["pm10"],
+            hourly["us_aqi"],
+            hourly["european_aqi"],
+            strict=True,
+        )
     ]
 
 
@@ -107,14 +150,11 @@ _DAILY_SQL = text(
 
 @router.get("/daily")
 async def get_daily(
-    Locations: str,
+    Locations: LocationCodes,
     From: date,
     To: date,
     session: AsyncSession = Depends(get_session),
-) -> list[dict]:
-    codes = [code.strip() for code in Locations.split(",") if code.strip()]
-    if not codes:
-        raise HTTPException(status_code=422, detail="Locations must not be blank")
+) -> list[LocationDaily]:
     if From > To:
         raise HTTPException(status_code=422, detail="From must not be after To")
 
@@ -122,7 +162,7 @@ async def get_daily(
         await session.execute(
             _DAILY_SQL,
             {
-                "location_codes": codes,
+                "location_codes": Locations,
                 "date_from": From,
                 "date_to": To,
                 "min_hours": MIN_HOURS_PER_DAY,
@@ -132,23 +172,23 @@ async def get_daily(
         )
     ).all()
 
-    by_location: dict[str, dict] = {}
+    by_location: dict[str, LocationDaily] = {}
     for row in rows:
         entry = by_location.setdefault(
             row.location_code,
-            {"Code": row.location_code, "Name": row.location_name, "Days": []},
+            LocationDaily(code=row.location_code, name=row.location_name, days=[]),
         )
-        entry["Days"].append(
-            {
-                "Date": row.local_date.isoformat(),
-                "HoursCount": row.hours_count,
-                "ForecastHours": row.forecast_hours,
-                "AvgPm2_5": row.avg_pm2_5,
-                "AvgPm10": row.avg_pm10,
-                "AvgUsAqi": row.avg_us_aqi,
-                "AvgEuropeanAqi": row.avg_european_aqi,
-                "ExceedsWhoPm2_5": row.exceeds_who_pm2_5,
-                "ExceedsWhoPm10": row.exceeds_who_pm10,
-            }
+        entry.days.append(
+            DailyEntry(
+                date=row.local_date.isoformat(),
+                hours_count=row.hours_count,
+                forecast_hours=row.forecast_hours,
+                avg_pm2_5=row.avg_pm2_5,
+                avg_pm10=row.avg_pm10,
+                avg_us_aqi=row.avg_us_aqi,
+                avg_european_aqi=row.avg_european_aqi,
+                exceeds_who_pm2_5=row.exceeds_who_pm2_5,
+                exceeds_who_pm10=row.exceeds_who_pm10,
+            )
         )
     return list(by_location.values())
