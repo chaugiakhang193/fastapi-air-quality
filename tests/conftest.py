@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime
 
 import httpx2
 import pytest
@@ -138,14 +139,14 @@ async def api_client():
         yield http_client
 
 
-def _hourly_payload(latitude: float, longitude: float) -> dict:
+def _hourly_payload(latitude: float, longitude: float, pm2_5_offset: float = 0.0) -> dict:
     times = [f"2026-09-18T{hour:02d}:00" for hour in range(24)]
     return {
         "latitude": latitude,
         "longitude": longitude,
         "hourly": {
             "time": times,
-            "pm2_5": [float(hour + 1) for hour in range(24)],
+            "pm2_5": [float(hour + 1) + pm2_5_offset for hour in range(24)],
             "pm10": [float(hour + 2) for hour in range(24)],
             "us_aqi": [hour + 10 for hour in range(24)],
             "european_aqi": [hour + 5 for hour in range(24)],
@@ -190,3 +191,45 @@ async def slow_client():
 
     async with httpx2.AsyncClient(transport=httpx2.MockTransport(handler)) as http_client:
         yield http_client
+
+
+@pytest.fixture
+async def make_open_meteo_client():
+    created: list[httpx2.AsyncClient] = []
+
+    def factory(
+        *,
+        run_at: datetime,
+        available_at: datetime,
+        pm2_5_offset: float = 0.0,
+        meta_status: int = 200,
+        hourly_status: int = 200,
+    ) -> httpx2.AsyncClient:
+        def handler(request: httpx2.Request) -> httpx2.Response:
+            if request.url.path.endswith("meta.json"):
+                if meta_status != 200:
+                    return httpx2.Response(meta_status, json={"reason": "meta failed"})
+                return httpx2.Response(
+                    200,
+                    json={
+                        "last_run_initialisation_time": int(run_at.timestamp()),
+                        "last_run_availability_time": int(available_at.timestamp()),
+                    },
+                )
+            if hourly_status != 200:
+                return httpx2.Response(hourly_status, json={"reason": "hourly failed"})
+            return httpx2.Response(
+                200,
+                json=[
+                    _hourly_payload(loc["latitude"], loc["longitude"], pm2_5_offset)
+                    for loc in SEED_LOCATIONS
+                ],
+            )
+
+        http_client = httpx2.AsyncClient(transport=httpx2.MockTransport(handler))
+        created.append(http_client)
+        return http_client
+
+    yield factory
+    for http_client in created:
+        await http_client.aclose()
