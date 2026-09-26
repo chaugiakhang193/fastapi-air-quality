@@ -29,6 +29,11 @@ class Settings(BaseSettings):
     daily_cache_ttl_seconds: int = 3600
     redis_timeout_seconds: float = 0.5
 
+    # Off by default so test runs and plain `fastapi dev` sessions never poll
+    # Open-Meteo on their own; enable it in .env to collect snapshots.
+    snapshot_scheduler_enabled: bool = False
+    snapshot_interval_minutes: float = 60
+
 
 @lru_cache
 def get_settings() -> Settings:

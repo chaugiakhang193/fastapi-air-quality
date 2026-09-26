@@ -1,3 +1,10 @@
+import os
+
+# TestClient(app) runs the lifespan, so an enabled scheduler would poll the
+# real Open-Meteo during tests. An environment variable overrides .env, and it
+# must be set before any app module calls get_settings() at import time.
+os.environ["AIRQ_SNAPSHOT_SCHEDULER_ENABLED"] = "false"
+
 import asyncio
 from datetime import datetime
 

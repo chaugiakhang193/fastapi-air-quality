@@ -1,3 +1,4 @@
+import asyncio
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -66,6 +67,12 @@ async def take_snapshot(
         return result
     except SnapshotLockHeldError:
         await _finish_run_log(run_log_id, SnapshotRunStatus.FAILED, error_code="lock_held")
+        raise
+    except asyncio.CancelledError:
+        # CancelledError is not an Exception subclass, so the branch below
+        # misses it; without this, a run cancelled at shutdown stays "running".
+        # Re-raising is required: swallowing the cancellation would stall shutdown.
+        await _finish_run_log(run_log_id, SnapshotRunStatus.FAILED, error_code="cancelled")
         raise
     except Exception as exc:
         await _finish_run_log(

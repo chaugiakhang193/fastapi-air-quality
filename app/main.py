@@ -1,3 +1,5 @@
+import asyncio
+import contextlib
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -14,6 +16,7 @@ from app.core.logging import configure_logging
 from app.core.middleware import RequestIdMiddleware, TimingMiddleware
 from app.core.redis import create_redis
 from app.core.settings import get_settings
+from app.services.snapshot_scheduler import run_snapshot_scheduler
 
 
 @asynccontextmanager
@@ -22,9 +25,25 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
     app.state.http_client = httpx2.AsyncClient(timeout=settings.open_meteo_timeout_seconds)
     app.state.redis = create_redis(settings)
+    scheduler: asyncio.Task[None] | None = None
+    if settings.snapshot_scheduler_enabled:
+        scheduler = asyncio.create_task(
+            run_snapshot_scheduler(
+                app.state.http_client,
+                settings,
+                app.state.redis,
+                interval_seconds=settings.snapshot_interval_minutes * 60,
+            )
+        )
     try:
         yield
     finally:
+        # The scheduler stops first: a pass still running when the clients
+        # below close would fail on a closed client instead of being cancelled.
+        if scheduler is not None:
+            scheduler.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await scheduler
         # try/finally so the clients are still closed if something throws the
         # exception back into this generator during shutdown.
         await app.state.http_client.aclose()
