@@ -1,7 +1,7 @@
 import logging
 from datetime import date
 
-from pydantic import TypeAdapter
+from pydantic import TypeAdapter, ValidationError
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
 
@@ -29,7 +29,13 @@ async def read_daily(redis: Redis, key: str) -> list[LocationDaily] | None:
         return None
     if raw is None:
         return None
-    return _daily_adapter.validate_json(raw)
+    try:
+        return _daily_adapter.validate_json(raw)
+    except ValidationError:
+        # An entry that no longer matches LocationDaily (for example, written
+        # before a schema change) is a miss; the route's write replaces it.
+        logger.warning("daily cache entry is invalid, using the database key=%s", key)
+        return None
 
 
 async def write_daily(redis: Redis, key: str, value: list[LocationDaily], ttl_seconds: int) -> None:

@@ -1,3 +1,4 @@
+import json
 from datetime import UTC, date, datetime, timedelta
 
 import pytest
@@ -124,3 +125,30 @@ async def test_daily_falls_back_to_the_database_when_redis_is_down(
 
     assert day["HoursCount"] == 24
     assert day["AvgPm2_5"] == 12.5
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "corrupt_value",
+    ["not json", '{"code": "hanoi"}', '[{"code": "hanoi"}]'],
+    ids=["not-json", "object-not-list", "missing-fields"],
+)
+async def test_corrupt_cache_entry_is_treated_as_a_miss_and_replaced(
+    make_open_meteo_client, settings, redis_client, api_client, corrupt_value: str
+) -> None:
+    now = _now()
+    await take_snapshot(
+        make_open_meteo_client(
+            run_at=now - timedelta(hours=2), available_at=now - timedelta(hours=1)
+        ),
+        settings,
+        redis_client,
+    )
+    key = daily_cache_key(["hanoi"], date(2026, 9, 18), date(2026, 9, 18))
+    await redis_client.set(key, corrupt_value)
+
+    day = await _hanoi_day(api_client)
+
+    assert day["AvgPm2_5"] == 12.5
+    replaced = json.loads(await redis_client.get(key))
+    assert replaced[0]["code"] == "hanoi"
