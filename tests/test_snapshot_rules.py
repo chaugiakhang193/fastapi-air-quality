@@ -14,7 +14,7 @@ def _now() -> datetime:
 
 @pytest.mark.anyio
 async def test_older_run_does_not_overwrite_readings_from_a_newer_run(
-    make_open_meteo_client, settings, test_engine
+    make_open_meteo_client, settings, redis_client, test_engine
 ) -> None:
     now = _now()
     newer_run_at = now - timedelta(hours=2)
@@ -24,8 +24,8 @@ async def test_older_run_does_not_overwrite_readings_from_a_newer_run(
     )
     older = make_open_meteo_client(run_at=older_run_at, available_at=now - timedelta(hours=13))
 
-    await take_snapshot(newer, settings)
-    await take_snapshot(older, settings)
+    await take_snapshot(newer, settings, redis_client)
+    await take_snapshot(older, settings, redis_client)
 
     async with test_engine.connect() as connection:
         rows_from_other_runs = await connection.scalar(
@@ -50,6 +50,7 @@ async def test_older_run_does_not_overwrite_readings_from_a_newer_run(
 async def test_run_is_recorded_only_after_the_availability_delay(
     make_open_meteo_client,
     settings,
+    redis_client,
     test_engine,
     minutes_since_available: int,
     expected_status: str,
@@ -62,7 +63,7 @@ async def test_run_is_recorded_only_after_the_availability_delay(
     )
     delayed_settings = settings.model_copy(update={"snapshot_min_available_delay_minutes": 10})
 
-    result = await take_snapshot(client, delayed_settings)
+    result = await take_snapshot(client, delayed_settings, redis_client)
 
     async with test_engine.connect() as connection:
         model_runs = await connection.scalar(select(func.count()).select_from(ModelRunRow))
@@ -79,6 +80,7 @@ async def test_run_is_recorded_only_after_the_availability_delay(
 async def test_failed_upstream_marks_run_failed_and_does_not_block_the_next_run(
     make_open_meteo_client,
     settings,
+    redis_client,
     test_engine,
     meta_status: int,
     hourly_status: int,
@@ -90,7 +92,7 @@ async def test_failed_upstream_marks_run_failed_and_does_not_block_the_next_run(
     )
 
     with pytest.raises(httpx2.HTTPStatusError):
-        await take_snapshot(failing, settings)
+        await take_snapshot(failing, settings, redis_client)
 
     async with test_engine.connect() as connection:
         run_log = (
@@ -101,5 +103,5 @@ async def test_failed_upstream_marks_run_failed_and_does_not_block_the_next_run(
     assert run_log.error_code == "HTTPStatusError"
     assert model_runs == 0
 
-    result = await take_snapshot(make_open_meteo_client(**run_times), settings)
+    result = await take_snapshot(make_open_meteo_client(**run_times), settings, redis_client)
     assert result.status == "created"

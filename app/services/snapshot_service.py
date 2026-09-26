@@ -3,6 +3,7 @@ from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import httpx2
+from redis.asyncio import Redis
 from sqlalchemy import func, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,6 +19,7 @@ from app.models import (
     SnapshotRunRow,
     SnapshotRunStatus,
 )
+from app.services.daily_cache import invalidate_daily
 
 
 class SnapshotLockHeldError(Exception):
@@ -31,7 +33,9 @@ class SnapshotResult:
     locations_fetched: int
 
 
-async def take_snapshot(client: httpx2.AsyncClient, settings: Settings) -> SnapshotResult:
+async def take_snapshot(
+    client: httpx2.AsyncClient, settings: Settings, redis: Redis
+) -> SnapshotResult:
     run_log_id = await _start_run_log()
     model_run_id: int | None = None
     try:
@@ -49,6 +53,10 @@ async def take_snapshot(client: httpx2.AsyncClient, settings: Settings) -> Snaps
             if not lock_acquired:
                 raise SnapshotLockHeldError
             result, model_run_id = await _run_snapshot_locked(session, client, settings)
+        if result.status == "created":
+            # After the commit above: invalidating earlier would let a daily
+            # request re-cache the old rows before the new ones are visible.
+            await invalidate_daily(redis)
         status = (
             SnapshotRunStatus.SUCCEEDED
             if result.status == "created"

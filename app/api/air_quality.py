@@ -1,13 +1,16 @@
+import logging
 from datetime import date
 
 import httpx2
 from fastapi import APIRouter, Depends, HTTPException, Request
+from redis.asyncio import Redis
 from sqlalchemy import bindparam, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clients.open_meteo import fetch_hourly
 from app.core.db import get_session
 from app.core.envelope import EnvelopeRoute
+from app.core.redis import get_redis
 from app.core.settings import Settings, get_settings
 from app.repositories.locations import get_location_by_code
 from app.schemas.air_quality import (
@@ -18,6 +21,9 @@ from app.schemas.air_quality import (
     LocationHourly,
 )
 from app.schemas.location import Location
+from app.services.daily_cache import daily_cache_key, read_daily, write_daily
+
+logger = logging.getLogger("airq.cache")
 
 router = APIRouter(prefix="/air-quality", tags=["air-quality"], route_class=EnvelopeRoute)
 
@@ -154,9 +160,18 @@ async def get_daily(
     From: date,
     To: date,
     session: AsyncSession = Depends(get_session),
+    redis: Redis = Depends(get_redis),
+    settings: Settings = Depends(get_settings),
 ) -> list[LocationDaily]:
     if From > To:
         raise HTTPException(status_code=422, detail="From must not be after To")
+
+    cache_key = daily_cache_key(Locations, From, To)
+    cached = await read_daily(redis, cache_key)
+    if cached is not None:
+        logger.info("daily cache hit key=%s", cache_key)
+        return cached
+    logger.info("daily cache miss key=%s", cache_key)
 
     rows = (
         await session.execute(
@@ -191,4 +206,6 @@ async def get_daily(
                 exceeds_who_pm10=row.exceeds_who_pm10,
             )
         )
-    return list(by_location.values())
+    daily = list(by_location.values())
+    await write_daily(redis, cache_key, daily, settings.daily_cache_ttl_seconds)
+    return daily

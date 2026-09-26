@@ -3,8 +3,10 @@ import hmac
 import httpx2
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
+from redis.asyncio import Redis
 
 from app.core.envelope import EnvelopeRoute
+from app.core.redis import get_redis
 from app.core.settings import Settings, get_settings
 from app.services.snapshot_service import SnapshotLockHeldError, take_snapshot
 
@@ -23,10 +25,11 @@ def require_snapshot_api_key(
 async def create_snapshot(
     request: Request,
     settings: Settings = Depends(get_settings),
+    redis: Redis = Depends(get_redis),
 ) -> JSONResponse:
     client = request.app.state.http_client
     try:
-        result = await take_snapshot(client, settings)
+        result = await take_snapshot(client, settings, redis)
     except SnapshotLockHeldError:
         raise HTTPException(
             status_code=409,

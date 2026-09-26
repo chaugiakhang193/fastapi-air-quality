@@ -7,13 +7,13 @@ from app.services.snapshot_service import take_snapshot
 
 @pytest.mark.anyio
 async def test_second_snapshot_is_unchanged_and_does_not_duplicate_rows(
-    client, settings, test_engine
+    client, settings, redis_client, test_engine
 ):
-    first = await take_snapshot(client, settings)
+    first = await take_snapshot(client, settings, redis_client)
     async with test_engine.connect() as connection:
         first_count = await connection.scalar(select(func.count()).select_from(AirReadingRow))
 
-    second = await take_snapshot(client, settings)
+    second = await take_snapshot(client, settings, redis_client)
     async with test_engine.connect() as connection:
         second_count = await connection.scalar(select(func.count()).select_from(AirReadingRow))
         run_count = await connection.scalar(select(func.count()).select_from(ModelRunRow))

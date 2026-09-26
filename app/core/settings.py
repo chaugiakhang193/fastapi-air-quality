@@ -21,9 +21,13 @@ class Settings(BaseSettings):
     # These legacy variable names are kept for compatibility with .env.example.
     database_url: str = Field(validation_alias="DATABASE_URL")
     snapshot_api_key: str = Field(validation_alias="SNAPSHOT_API_KEY")
+    redis_url: str = Field(validation_alias="REDIS_URL")
 
     snapshot_max_past_days: int = 92
     snapshot_min_available_delay_minutes: int = 10
+
+    daily_cache_ttl_seconds: int = 3600
+    redis_timeout_seconds: float = 0.5
 
 
 @lru_cache

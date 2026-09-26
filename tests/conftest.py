@@ -3,11 +3,13 @@ from datetime import datetime
 
 import httpx2
 import pytest
+from redis.asyncio import Redis
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
 from app.core.db import get_session
+from app.core.redis import get_redis
 from app.core.settings import get_settings
 from app.main import app
 from app.models import Base, LocationRow
@@ -233,3 +235,43 @@ async def make_open_meteo_client():
     yield factory
     for http_client in created:
         await http_client.aclose()
+
+
+def _test_redis_url() -> str:
+    # DB 1 keeps test keys away from the development cache in DB 0.
+    return get_settings().redis_url.rsplit("/", 1)[0] + "/1"
+
+
+@pytest.fixture(autouse=True)
+def clean_redis():
+    async def clean() -> None:
+        redis = Redis.from_url(_test_redis_url(), decode_responses=True)
+        try:
+            await redis.flushdb()
+        finally:
+            await redis.aclose()
+
+    asyncio.run(clean())
+
+
+@pytest.fixture(autouse=True)
+def override_redis():
+    # A client per request: a client created in a fixture's asyncio.run()
+    # loop cannot be reused from the loop that serves the request.
+    async def test_redis():
+        redis = Redis.from_url(_test_redis_url(), decode_responses=True)
+        try:
+            yield redis
+        finally:
+            await redis.aclose()
+
+    app.dependency_overrides[get_redis] = test_redis
+    yield
+    app.dependency_overrides.pop(get_redis, None)
+
+
+@pytest.fixture
+async def redis_client():
+    redis = Redis.from_url(_test_redis_url(), decode_responses=True)
+    yield redis
+    await redis.aclose()

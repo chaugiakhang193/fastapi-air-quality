@@ -9,6 +9,7 @@ dependencies = [
     "fastapi[standard-no-fastapi-cloud-cli]>=0.141.1",
     "httpx2>=2.13.0",
     "pydantic-settings>=2.15.0",
+    "redis>=8.1.0",
     "sqlalchemy[asyncio]>=2.0.54",
     "tzdata>=2026.4",
 ]

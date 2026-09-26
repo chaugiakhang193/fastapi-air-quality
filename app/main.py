@@ -12,6 +12,7 @@ from app.core.db import engine
 from app.core.envelope import EnvelopeRoute, http_exception_to_response
 from app.core.logging import configure_logging
 from app.core.middleware import RequestIdMiddleware, TimingMiddleware
+from app.core.redis import create_redis
 from app.core.settings import get_settings
 
 
@@ -20,12 +21,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     configure_logging()
     settings = get_settings()
     app.state.http_client = httpx2.AsyncClient(timeout=settings.open_meteo_timeout_seconds)
+    app.state.redis = create_redis(settings)
     try:
         yield
     finally:
-        # try/finally so the client is still closed if something throws the
+        # try/finally so the clients are still closed if something throws the
         # exception back into this generator during shutdown.
         await app.state.http_client.aclose()
+        await app.state.redis.aclose()
         await engine.dispose()
 
 
