@@ -1,7 +1,7 @@
 import httpx2
 import pytest
 
-from app.api.air_quality import get_http_client
+from app.core.http_client import get_http_client
 from app.main import app
 from app.schemas.air_quality import split_locations
 

@@ -2,8 +2,8 @@ import httpx2
 import pytest
 from fastapi.testclient import TestClient
 
-from app.api.air_quality import get_http_client
 from app.clients.open_meteo import fetch_hourly
+from app.core.http_client import get_http_client
 from app.main import app
 from app.schemas.location import Location
 

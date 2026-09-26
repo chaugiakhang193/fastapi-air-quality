@@ -2,7 +2,7 @@ import logging
 from datetime import date
 
 import httpx2
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException
 from redis.asyncio import Redis
 from sqlalchemy import bindparam, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.clients.open_meteo import fetch_hourly
 from app.core.db import get_session
 from app.core.envelope import EnvelopeRoute
+from app.core.http_client import get_http_client
 from app.core.redis import get_redis
 from app.core.settings import Settings, get_settings
 from app.repositories.locations import get_location_by_code
@@ -26,11 +27,6 @@ from app.services.daily_cache import daily_cache_key, read_daily, write_daily
 logger = logging.getLogger("airq.cache")
 
 router = APIRouter(prefix="/air-quality", tags=["air-quality"], route_class=EnvelopeRoute)
-
-
-def get_http_client(request: Request) -> httpx2.AsyncClient:
-    # Created once in main.py's lifespan so every request reuses one connection pool.
-    return request.app.state.http_client
 
 
 async def resolve_locations(codes: list[str], session: AsyncSession) -> list[Location]:

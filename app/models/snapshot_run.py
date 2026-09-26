@@ -22,13 +22,16 @@ class SnapshotRunRow(Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # Store status as a varchar so adding a state does not require altering a Postgres enum type.
     # values_callable persists each member's value ("running") instead of SQLAlchemy's
-    # default of the member's name ("RUNNING").
+    # default of the member's name ("RUNNING"). create_constraint adds the CHECK that
+    # migration 0002 creates, so tables built by create_all() in tests enforce it too.
     status: Mapped[SnapshotRunStatus] = mapped_column(
         Enum(
             SnapshotRunStatus,
             native_enum=False,
             length=20,
             values_callable=lambda enum_cls: [member.value for member in enum_cls],
+            create_constraint=True,
+            name="ck_snapshot_run_status",
         )
     )
     model_run_id: Mapped[int | None] = mapped_column(ForeignKey("model_run.id"), nullable=True)
