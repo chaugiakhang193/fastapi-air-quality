@@ -41,7 +41,9 @@ def _price_app() -> FastAPI:
 
     @lab_app.get("/price")
     async def read_price() -> Price:
-        return Price(amount="1.50")
+        # A plain dict keeps the handler from touching Price, so any failure
+        # comes from FastAPI validating the response against the annotation.
+        return {"amount": "1.50"}
 
     return lab_app
 
