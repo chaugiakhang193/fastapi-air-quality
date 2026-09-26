@@ -39,15 +39,7 @@ async def resolve_locations(codes: list[str], session: AsyncSession) -> list[Loc
         row = await get_location_by_code(session, code)
         if row is None:
             raise HTTPException(status_code=404, detail=f"Unknown location code: {code}")
-        resolved.append(
-            Location(
-                code=row.code,
-                name=row.name,
-                latitude=row.latitude,
-                longitude=row.longitude,
-                timezone=row.timezone,
-            )
-        )
+        resolved.append(Location.model_validate(row))
     return resolved
 
 
